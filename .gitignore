@@ -24,8 +24,5 @@ research/digest_*.md
 # Downloaded paper PDFs (notes.md stays tracked)
 research/papers/*.pdf
 
-# Private project dump (kept local only)
-
-
 # Training console log (contains local paths)
 train_log.txt
