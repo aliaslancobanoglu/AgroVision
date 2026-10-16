@@ -124,6 +124,10 @@ comes from field data split by field.
 - Extract frames at 2 FPS, not the native framerate.
 - Real field data needs `imgsz=1280` (2–5 cm weeds).
 
+## Tests
+
+Run the tests with `python -m pytest` (needs `pytest`, see `setup.md`). They build their synthetic data at runtime in a temp folder.
+
 ## License note
 
 This repository is released under **AGPL-3.0** (see `LICENSE`) because it depends on

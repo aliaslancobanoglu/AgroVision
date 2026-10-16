@@ -51,7 +51,7 @@ CUDA index for your driver, you may use it instead; the only requirement is that
 ## 4. Remaining packages
 
 ```powershell
-python -m pip install ultralytics opencv-python pandas matplotlib
+python -m pip install ultralytics opencv-python pandas matplotlib pytest
 ```
 
 Because a CUDA torch is already present and satisfies ultralytics' requirement,
