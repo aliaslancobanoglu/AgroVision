@@ -16,6 +16,10 @@ video_id is the source video's filename stem. Name videos
 -> video_id "beet_F01_20270415_cam3", crop "beet", field "F01". Crop must be
 wheat, beet or corn. Avoid "__" inside video filenames.
 
+Every video name is validated against this convention (crops.parse_video_id) BEFORE
+any frame is extracted. One invalid name is a hard error and nothing is written, so a
+misnamed video is caught here, not after labeling.
+
 Usage
 -----
     python extract_frames.py videos/                    # every video in a folder
@@ -28,6 +32,8 @@ from pathlib import Path
 
 import cv2
 
+from crops import parse_video_id
+
 VIDEO_EXTS = {'.mp4', '.mov', '.avi', '.mkv', '.m4v', '.mts', '.ts'}
 SEP = '__'
 DEFAULT_FPS = 2.0
@@ -39,6 +45,25 @@ def video_id_for(path: Path) -> str:
         raise ValueError(f"Video name '{path.name}' contains '{SEP}', which is reserved "
                          f"as the video-id separator. Rename the file.")
     return vid
+
+
+def validate_video_names(videos) -> list:
+    """Video IDs of `videos`, after checking that EVERY name follows
+    <crop>_<field>_<YYYYMMDD>_<cam>. Any invalid name is a hard error that lists all of
+    them; call this before writing anything."""
+    ids, bad = [], []
+    for v in videos:
+        try:
+            vid = video_id_for(v)
+            parse_video_id(vid)
+            ids.append(vid)
+        except ValueError as e:
+            bad.append(f'  {v.name}: {e}')
+    if bad:
+        raise SystemExit('Invalid video name(s) — nothing was extracted:\n' + '\n'.join(bad) +
+                         '\nRename the file(s) to <crop>_<field>_<YYYYMMDD>_<cam>, '
+                         'e.g. beet_F01_20270415_cam3.mp4')
+    return ids
 
 
 def extract(path: Path, out_dir: Path, target_fps: float, jpeg_quality: int) -> int:
@@ -95,7 +120,7 @@ def main():
     if not videos:
         raise SystemExit('No videos found.')
 
-    ids = [video_id_for(v) for v in videos]
+    ids = validate_video_names(videos)          # before any frame (or the output folder) is written
     dupes = {i for i in ids if ids.count(i) > 1}
     if dupes:
         raise SystemExit(f'Duplicate video IDs (same filename stem): {sorted(dupes)}. Rename first.')
