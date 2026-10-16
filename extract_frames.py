@@ -11,9 +11,10 @@ Output naming (split_dataset.py depends on this — do not change casually):
 
     <video_id>__f<frame_index:06d>.jpg
 
-video_id is the source video's filename stem. Name videos so the field is
-recoverable from it, e.g.  FIELD01_20270415_cam3.mp4 -> video_id
-"FIELD01_20270415_cam3", field "FIELD01". Avoid "__" inside video filenames.
+video_id is the source video's filename stem. Name videos
+<crop>_<field>_<YYYYMMDD>_<cam> (see crops.py), e.g.  beet_F01_20270415_cam3.mp4
+-> video_id "beet_F01_20270415_cam3", crop "beet", field "F01". Crop must be
+wheat, beet or corn. Avoid "__" inside video filenames.
 
 Usage
 -----

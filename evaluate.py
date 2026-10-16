@@ -82,11 +82,30 @@ ground-truth weed boxes. No detector can save more than the oracle does at
 100% strip recall; if the oracle itself is above 65%, the field (or the strip
 width) makes the project fail regardless of model quality.
 
+Crop-aware evaluation (--crop-mode)
+-----------------------------------
+Labels describe what a plant IS (wheat, beet, corn, weed); the spray decision
+comes from the FIELD's crop: in a beet field every class except beet is sprayed
+(a volunteer wheat plant in a beet field is a weed). --crop-mode picks how the
+field's crop is known:
+    legacy   (default) Kaggle behaviour: classes 0 = crop, 1 = weed, weed = class 1.
+    auto     the crop is parsed from each image's file name
+             (<crop>_<field>_<YYYYMMDD>_<cam>__f<index>.jpg); that image's spray
+             classes = every class in data.yaml except its crop.
+    <crop>   a fixed crop name (wheat, beet, corn): every image is that crop's field.
+Before matching, all spray classes (in GT and in detections) are collapsed into
+one, so a volunteer wheat plant detected as "weed" still counts as found.
+Strip recall, box recall, spray rate, oracle and the PASS/FAIL verdict are
+reported PER CROP; a pooled overall row is shown for information only and is
+never the verdict.
+
 Usage
 -----
     python evaluate.py                                  # default weights
     python evaluate.py --weights runs/<RUN>/weights/best.pt
     python evaluate.py --weights ... --imgsz 1280       # real field data
+    python evaluate.py --weights ... --data dataset_konya/data.yaml --crop-mode auto
+    python evaluate.py --weights ... --data ... --crop-mode beet
 """
 
 import argparse
@@ -98,13 +117,16 @@ import pandas as pd
 import torch
 import yaml
 
+from crops import CROPS, parse_video_id, video_id_of_name
+
 ROOT = Path(__file__).resolve().parent
 
 # ----------------------------------------------------------------------------
 # Constants
 # ----------------------------------------------------------------------------
 NOZZLE_CELLS_PER_FRAME = 5     # ~2.6 m frame / 0.5 m nozzle spacing
-WEED_CLASS = 1
+WEED_CLASS = 1                 # legacy (Kaggle) mode only: 0 = crop, 1 = weed
+LEGACY_SPRAY_CLASSES = frozenset({WEED_CLASS})
 IOU_MATCH = 0.5
 CONF_THRESHOLDS = np.round(np.arange(0.05, 0.95 + 1e-9, 0.05), 2)
 
@@ -146,14 +168,44 @@ def resolve_val_dirs(data_yaml: Path):
     return img_dir, Path(*parts)
 
 
-def load_gt_weeds(label_path: Path, w: int, h: int) -> np.ndarray:
-    """GT weed boxes as (N, 4) xyxy pixels. Missing/empty label file -> no boxes."""
+def class_names(data_yaml: Path) -> dict:
+    """{class id: name} from data.yaml ('names' as list or dict)."""
+    names = yaml.safe_load(data_yaml.read_text(encoding='utf-8'))['names']
+    items = names.items() if isinstance(names, dict) else enumerate(names)
+    return {int(i): str(n) for i, n in items}
+
+
+def spray_classes_for(crop, names: dict) -> frozenset:
+    """Class ids sprayed in a field of `crop`: every class except the crop itself.
+    crop None = legacy Kaggle mode (weed = class 1 only)."""
+    if crop is None:
+        return LEGACY_SPRAY_CLASSES
+    ids = [i for i, n in names.items() if n == crop]
+    if not ids:
+        raise ValueError(f"Crop '{crop}' is not a class in data.yaml names {sorted(names.values())}; "
+                         f"cannot tell which class is the field's crop.")
+    return frozenset(i for i in names if i not in ids)
+
+
+def crop_of_image(path: Path, crop_mode: str):
+    """Field crop of an image: None (legacy), the fixed crop, or parsed from the file name."""
+    if crop_mode == 'legacy':
+        return None
+    if crop_mode == 'auto':
+        return parse_video_id(video_id_of_name(path.name)).crop
+    return crop_mode
+
+
+def load_gt_weeds(label_path: Path, w: int, h: int,
+                  spray_classes=LEGACY_SPRAY_CLASSES) -> np.ndarray:
+    """GT boxes of every spray class, collapsed into one, as (N, 4) xyxy pixels.
+    Missing/empty label file -> no boxes."""
     if not label_path.exists():
         return np.zeros((0, 4))
     rows = [ln.split() for ln in label_path.read_text().splitlines() if ln.strip()]
     boxes = []
     for r in rows:
-        if int(float(r[0])) != WEED_CLASS:
+        if int(float(r[0])) not in spray_classes:
             continue
         xc, yc, bw, bh = (float(v) for v in r[1:5])
         boxes.append([(xc - bw / 2) * w, (yc - bh / 2) * h,
@@ -263,14 +315,13 @@ def run_inference(weights, img_paths, imgsz, device):
                              stream=True, verbose=False):
         speeds.append(res.speed)
         b = res.boxes
-        cls = b.cls.cpu().numpy().astype(int)
-        keep = cls == WEED_CLASS
         h, w = res.orig_shape
         per_image.append({
             'path': Path(res.path),
             'w': w, 'h': h,
-            'xyxy': b.xyxy.cpu().numpy()[keep],
-            'conf': b.conf.cpu().numpy()[keep],
+            'cls': b.cls.cpu().numpy().astype(int),
+            'xyxy': b.xyxy.cpu().numpy(),
+            'conf': b.conf.cpu().numpy(),
         })
     # Median ms/image per stage (Ultralytics timings, PyTorch, batch 1, conf 0.05).
     # The median ignores the slow first-image warm-up.
@@ -278,10 +329,19 @@ def run_inference(weights, img_paths, imgsz, device):
     return per_image, speed
 
 
-def sweep(per_image, labels_dir):
+def prepare(per_image, labels_dir, names, crop_mode):
+    """Assign each image its field crop and spray classes, then collapse all spray
+    classes into one: keep only spray-class detections and GT boxes (class ignored
+    from here on). Must run once before sweep()."""
     for d in per_image:
-        d['gt'] = load_gt_weeds(labels_dir / (d['path'].stem + '.txt'), d['w'], d['h'])
+        d['crop'] = crop_of_image(d['path'], crop_mode)
+        spray = spray_classes_for(d['crop'], names)
+        keep = np.isin(d['cls'], list(spray))
+        d['xyxy'], d['conf'] = d['xyxy'][keep], d['conf'][keep]
+        d['gt'] = load_gt_weeds(labels_dir / (d['path'].stem + '.txt'), d['w'], d['h'], spray)
 
+
+def sweep(per_image):
     n_gt = sum(len(d['gt']) for d in per_image)
     total_strips = len(per_image) * NOZZLE_CELLS_PER_FRAME
     oracle = sum(sprayed_strips(d['gt'], d['w'], NOZZLE_CELLS_PER_FRAME)
@@ -342,7 +402,7 @@ def print_spill_reference(df, per_image, n_gt):
     print('=' * 64)
 
 
-def plot(df, oracle, out_png):
+def plot(df, oracle, out_png, label=None):
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
@@ -372,8 +432,8 @@ def plot(df, oracle, out_png):
     ax.set_ylim(0, 1.0)
     ax.set_xlabel('Weed recall (solid: strip-level, dashed: box IoU ≥ 0.5)', color=ink)
     ax.set_ylabel(f'Spray rate ({NOZZLE_CELLS_PER_FRAME} nozzle strips / frame)', color=ink)
-    ax.set_title('Strip-level weed recall vs. spray rate — PASS region shaded',
-                 color=ink, fontsize=11)
+    ax.set_title('Strip-level weed recall vs. spray rate — PASS region shaded'
+                 + (f' [{label}]' if label else ''), color=ink, fontsize=11)
     ax.grid(color=grid, lw=0.6)
     for s in ('top', 'right'):
         ax.spines[s].set_visible(False)
@@ -392,9 +452,10 @@ def best_at_target(df, recall_col):
     return None if ok.empty else ok.loc[ok['spray_rate'].idxmin()]
 
 
-def verdict(df, oracle):
+def verdict(df, oracle, label=None):
     print('\n' + '=' * 64)
-    print(f'  GO / NO-GO VERDICT  (nozzle cells per frame = {NOZZLE_CELLS_PER_FRAME})')
+    print(f'  GO / NO-GO VERDICT{f" — CROP: {label}" if label else ""}  '
+          f'(nozzle cells per frame = {NOZZLE_CELLS_PER_FRAME})')
     print('  Decision metric: STRIP-LEVEL weed recall')
     print('=' * 64)
     row = best_at_target(df, 'strip_recall')
@@ -431,12 +492,72 @@ def verdict(df, oracle):
     return passed
 
 
+def crop_mode_arg(value):
+    if value in ('legacy', 'auto') or value in CROPS:
+        return value
+    raise argparse.ArgumentTypeError(
+        f"'{value}': use legacy, auto, or a crop name ({', '.join(CROPS)})")
+
+
+def report(df, n_gt, total_strips, oracle, per_image, out_dir, label=None, speed_text=None,
+           decide=True):
+    """Write CSV + plot for one group of images and print its table. With decide=True
+    also print the PASS/FAIL verdict block and the spill-tolerance reference."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    csv_path, png_path = out_dir / 'recall_vs_spray.csv', out_dir / 'recall_vs_spray.png'
+    df.to_csv(csv_path, index=False, float_format='%.4f')
+    plot(df, oracle, png_path, label)
+
+    print(f'GT weed boxes: {n_gt} | total nozzle strips: {total_strips}')
+    if speed_text:
+        print(speed_text)
+    with pd.option_context('display.width', 120):
+        print(df[['conf', 'strip_recall', 'weed_recall', 'weed_precision', 'spray_rate', 'savings']]
+              .to_string(index=False, float_format=lambda v: f'{v:.3f}'))
+    print(f'\nCSV : {csv_path}\nPlot: {png_path}')
+    if decide:
+        passed = verdict(df, oracle, label)
+        print_spill_reference(df, per_image, n_gt)
+        return passed
+
+
+def summary_row(label, n_img, n_gt, df, oracle, result):
+    """One line of the final per-crop table (best strip-recall row at the target)."""
+    row = best_at_target(df, 'strip_recall')
+    out = {'crop': label, 'images': n_img, 'gt_weeds': n_gt}
+    if row is None:
+        out.update(conf=float('nan'), strip_recall=df['strip_recall'].max(),
+                   box_recall=df['weed_recall'].max(), spray_rate=float('nan'))
+    else:
+        out.update(conf=row['conf'], strip_recall=row['strip_recall'],
+                   box_recall=row['weed_recall'], spray_rate=row['spray_rate'])
+    out.update(oracle=oracle, verdict=result)
+    return out
+
+
+def print_summary(rows):
+    print('\n' + '=' * 64)
+    print(f'  PER-CROP SUMMARY  (strip recall target {TARGET_RECALL:.0%}, '
+          f'max spray rate {1 - SAVINGS_FLOOR:.0%})')
+    print('  recall / spray rate: at the lowest-spray threshold reaching the target;')
+    print('  if the target is not reached: max recall over all thresholds, spray rate "-".')
+    print('=' * 64)
+    tab = pd.DataFrame(rows)
+    with pd.option_context('display.width', 140):
+        print(tab.to_string(index=False, na_rep='-', float_format=lambda v: f'{v:.3f}'))
+    print('  The pooled overall row is information only; the verdict is per crop.')
+    print('=' * 64)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[1])
     ap.add_argument('--weights', default=DEFAULT_WEIGHTS)
     ap.add_argument('--data', default='data.yaml')
     ap.add_argument('--imgsz', type=int, default=640, help='1280 for real field data')
     ap.add_argument('--out', default=None, help='output dir (default runs/eval/<weights run name>)')
+    ap.add_argument('--crop-mode', type=crop_mode_arg, default='legacy',
+                    help='legacy (Kaggle: 0=crop, 1=weed) | auto (crop parsed from each image '
+                         'file name) | a fixed crop name: ' + ', '.join(CROPS))
     args = ap.parse_args()
 
     os.chdir(ROOT)
@@ -452,29 +573,59 @@ def main():
         raise FileNotFoundError(f'No images in {img_dir}')
     print(f'Val images: {len(img_paths)} in {img_dir}')
 
+    names = class_names(Path(args.data))
+    if args.crop_mode != 'legacy' and 'crop' in names.values():
+        raise ValueError("data.yaml has a class named 'crop'. Multi-crop labels say what the "
+                         "plant IS (wheat, beet, corn, weed), never 'crop'. Use --crop-mode legacy "
+                         "for the Kaggle set.")
+
     run_name = weights.parent.parent.name if weights.parent.name == 'weights' else weights.stem
     out_dir = Path(args.out) if args.out else ROOT / 'runs' / 'eval' / run_name
     out_dir.mkdir(parents=True, exist_ok=True)
 
     per_image, speed = run_inference(str(weights), img_paths, args.imgsz, device)
-    df, n_gt, total_strips, oracle = sweep(per_image, labels_dir)
-    if n_gt == 0:
-        raise RuntimeError('Val set contains no ground-truth weed boxes — recall is undefined.')
+    prepare(per_image, labels_dir, names, args.crop_mode)
+    speed_text = ('Speed (median ms/image, imgsz {}): preprocess {:.2f} | inference {:.2f} | '
+                  'postprocess {:.2f}'.format(args.imgsz, speed['preprocess'], speed['inference'],
+                                              speed['postprocess']))
 
-    csv_path, png_path = out_dir / 'recall_vs_spray.csv', out_dir / 'recall_vs_spray.png'
-    df.to_csv(csv_path, index=False, float_format='%.4f')
-    plot(df, oracle, png_path)
+    if args.crop_mode == 'legacy':
+        df, n_gt, total_strips, oracle = sweep(per_image)
+        if n_gt == 0:
+            raise RuntimeError('Val set contains no ground-truth weed boxes — recall is undefined.')
+        report(df, n_gt, total_strips, oracle, per_image, out_dir, speed_text=speed_text)
+        return
 
-    print(f'GT weed boxes: {n_gt} | total nozzle strips: {total_strips}')
-    print('Speed (median ms/image, imgsz {}): preprocess {:.2f} | inference {:.2f} | '
-          'postprocess {:.2f}'.format(args.imgsz, speed['preprocess'], speed['inference'],
-                                      speed['postprocess']))
-    with pd.option_context('display.width', 120):
-        print(df[['conf', 'strip_recall', 'weed_recall', 'weed_precision', 'spray_rate', 'savings']]
-              .to_string(index=False, float_format=lambda v: f'{v:.3f}'))
-    print(f'\nCSV : {csv_path}\nPlot: {png_path}')
-    verdict(df, oracle)
-    print_spill_reference(df, per_image, n_gt)
+    # ---- crop-aware: one evaluation per crop, then a pooled row for information ----
+    print(f'Crop mode: {args.crop_mode} | classes: {names}')
+    print(speed_text)
+    summary = []
+    for crop in sorted({d['crop'] for d in per_image}):
+        subset = [d for d in per_image if d['crop'] == crop]
+        spray = sorted(names[i] for i in spray_classes_for(crop, names))
+        print('\n' + '#' * 64)
+        print(f'  CROP: {crop} | {len(subset)} images | sprayed classes (collapsed to one): {spray}')
+        print('#' * 64)
+        df, n_gt, total_strips, oracle = sweep(subset)
+        if n_gt == 0:
+            print(f'  No ground-truth spray-class boxes for {crop} — recall is undefined, '
+                  f'no verdict.')
+            summary.append({'crop': crop, 'images': len(subset), 'gt_weeds': 0, 'verdict': 'N/A'})
+            continue
+        passed = report(df, n_gt, total_strips, oracle, subset, out_dir / crop, label=crop)
+        summary.append(summary_row(crop, len(subset), n_gt, df, oracle,
+                                   'PASS' if passed else 'FAIL'))
+
+    df, n_gt, total_strips, oracle = sweep(per_image)
+    if n_gt:
+        print('\n' + '#' * 64)
+        print('  OVERALL (pooled over crops) — information only, NOT a verdict')
+        print('#' * 64)
+        report(df, n_gt, total_strips, oracle, per_image, out_dir / 'overall',
+               label='overall, info only', decide=False)
+        summary.append(summary_row('overall (pooled, info only)', len(per_image), n_gt, df,
+                                   oracle, '-'))
+    print_summary(summary)
 
 
 if __name__ == '__main__':
