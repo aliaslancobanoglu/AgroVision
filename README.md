@@ -1,5 +1,38 @@
 # AgroVision AI
 
+## For outside readers
+
+**Problem.** Conventional sprayers treat the whole field with herbicide. Spot
+spraying fires a nozzle only where a weed is, which can cut herbicide use
+substantially. The open question is whether a camera-and-detector system can do
+that *without letting weeds through*.
+
+**Approach.**
+- *Detection:* a YOLO object detector finds weeds (and the crop) in boom-mounted
+  camera frames.
+- *Task-specific metric:* standard mAP does not tell you whether a weed was
+  actually sprayed. `evaluate.py` instead sweeps the confidence threshold and
+  reports **strip-level weed recall** (is every nozzle strip the weed touches
+  fired?) against **spray rate** (fraction of nozzle strips fired). The go/no-go
+  rule is stated in terms of that trade-off (see below).
+- *Field-level splitting:* video frames are near-duplicates, so train/val are
+  split by whole field (stratified by crop), never by frame, to avoid inflated
+  scores.
+
+**Status (honest).** The pipeline has been exercised end to end on a public
+sesame-field image dataset (static 512×512 close-ups). The PASS/FAIL printed on
+that dataset only shows that the pipeline runs; **it is not a project decision**,
+because those images are unlike what a real boom camera will see. Field video
+collection is planned for 2027, and the real go/no-go will be made on that data.
+
+**Data.** No field images, videos, datasets or trained weights are included in
+this repository.
+
+**License.** AGPL-3.0, see [`LICENSE`](LICENSE) (the project builds on
+Ultralytics YOLO, which is AGPL-3.0).
+
+---
+
 Weed detection for spot spraying in sugar beet and corn fields in Konya, Türkiye.
 Field system: 16 m boom, 32 nozzles at 50 cm spacing, 6–8 cameras at 1 m height,
 15 km/h. Field hardware: NVIDIA Jetson. Development: RTX 4070 laptop (8 GB).
@@ -17,7 +50,8 @@ arrives in spring 2027.
 | `evaluate.py` | Go/no-go metric: strip-level weed recall vs. spray rate sweep, verdict |
 | `infer_video.py` | Annotated video output + per-frame latency (mean, p95) |
 | `extract_frames.py` | Field video → frames at 2 FPS, video ID in each filename |
-| `split_dataset.py` | Train/val split by video/field, hard error on leakage |
+| `split_dataset.py` | Crop-stratified train/val split by field, hard error on leakage |
+| `crops.py` | Video naming convention `<crop>_<field>_<YYYYMMDD>_<cam>` and multi-crop class order |
 
 ## Pipeline order
 
@@ -32,8 +66,10 @@ Konya field data (2027):
 
 1. `python extract_frames.py videos/ --fps 2 --out frames` — 2 FPS, **not** native fps
 2. Label the frames (Roboflow or CVAT), export YOLO format
-3. `python split_dataset.py --images frames --labels <export> --out dataset_konya --group-pattern "^([^_]+)_"`
-   — split **by field/video**, never randomly by frame
+3. `python split_dataset.py --images frames --labels <export> --out dataset_konya`
+   — crop-stratified split **by field** (group = `crop_field` from the video name
+   `<crop>_<field>_<YYYYMMDD>_<cam>`), never randomly by frame; every crop needs at least 2 fields.
+   Evaluate with `evaluate.py --crop-mode auto` (per-crop verdicts; see the project notes "Multi-crop plan")
 4. Train at `imgsz=1280` with a smaller batch (see the comment block in `train.py`),
    pointing `DATA` at `dataset_konya/data.yaml`
 5. Run the three variants below and compare them with `evaluate.py --imgsz 1280`
@@ -90,7 +126,8 @@ comes from field data split by field.
 
 ## License note
 
-Ultralytics YOLO is licensed under **AGPL-3.0**. That is fine for research and
+This repository is released under **AGPL-3.0** (see `LICENSE`) because it depends on
+Ultralytics YOLO, which is AGPL-3.0. That is fine for research and
 internal development. If this ships as a product (e.g. closed firmware on a
 commercial sprayer), either the whole product must comply with AGPL-3.0 or an
 **Ultralytics Enterprise (commercial) license** is required.
