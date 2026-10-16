@@ -41,6 +41,18 @@ results pass — that would turn the go/no-go rule into a self-fulfilling one.
 The script also prints the result at SPILL_TOLERANCE_REFERENCE (0.1) once,
 labelled "reference only", purely to show how sensitive the verdict is to it.
 
+Uncertainty: 95% Wilson interval
+--------------------------------
+For each crop the verdict block also prints a 95% Wilson score interval for strip
+recall at the verdict threshold, together with the number of GT weeds, and a WARNING
+when the interval's lower bound is below the 98% target. The verdict itself stays on
+the point estimate.
+CAUTION: the interval treats every GT weed as an independent trial. Weeds are
+clustered by image and by field (neighbouring weeds share soil, light and growth
+stage, and many sit in the same frame), so the effective sample size is smaller than
+the number of weeds and this interval is OPTIMISTIC, i.e. narrower than the real
+uncertainty.
+
 Method
 ------
 1. Run inference once on the val split in data.yaml at the lowest swept
@@ -109,6 +121,7 @@ Usage
 """
 
 import argparse
+import math
 import os
 from pathlib import Path
 
@@ -138,6 +151,7 @@ SPILL_TOLERANCE_REFERENCE = 0.1   # printed once for sensitivity, never used for
 
 TARGET_RECALL = 0.98
 SAVINGS_FLOOR = 0.35           # spray rate must be <= 1 - 0.35 = 0.65
+Z95 = 1.959963984540054        # standard-normal quantile for a two-sided 95% interval
 
 DEFAULT_WEIGHTS = 'runs/kaggle_yolo11n_640/weights/best.pt'
 IMG_EXTS = {'.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff', '.webp'}
@@ -452,7 +466,40 @@ def best_at_target(df, recall_col):
     return None if ok.empty else ok.loc[ok['spray_rate'].idxmin()]
 
 
-def verdict(df, oracle, label=None):
+def wilson_interval(k: int, n: int, z: float = Z95):
+    """Wilson score interval (low, high) for a binomial proportion k/n; (nan, nan) if n == 0."""
+    if n <= 0:
+        return float('nan'), float('nan')
+    p = k / n
+    denom = 1 + z * z / n
+    centre = (p + z * z / (2 * n)) / denom
+    half = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / denom
+    return max(0.0, centre - half), min(1.0, centre + half)
+
+
+def print_strip_interval(df, row, n_gt):
+    """95% Wilson interval for strip recall at the verdict threshold (`row`; if no threshold
+    reaches the target, at the threshold with the highest strip recall), plus a warning when
+    its lower bound is below TARGET_RECALL. Information only: the verdict uses the point estimate."""
+    if row is None:
+        best = df[df['strip_recall'] == df['strip_recall'].max()]
+        row = best.loc[best['spray_rate'].idxmin()]
+        where = f'at conf = {row["conf"]:.2f} (highest strip recall; target not reached)'
+    else:
+        where = f'at the verdict threshold, conf = {row["conf"]:.2f}'
+    n = int(n_gt) if n_gt is not None else int(row['tp'] + row['fn'])
+    k = int(row['treated_weeds'])
+    lo, hi = wilson_interval(k, n)
+    print(f'  Strip recall 95% Wilson interval     : [{lo:.2%}, {hi:.2%}]')
+    print(f'                                         {where}')
+    print(f'  GT weeds (n)                         : {n} ({k} treated)')
+    if lo < TARGET_RECALL:
+        print(f'  WARNING: interval lower bound {lo:.2%} is below the {TARGET_RECALL:.0%} target; '
+              f'the verdict uses the point estimate only.')
+    print('  Note: weeds are clustered by image and field, so this interval is optimistic.')
+
+
+def verdict(df, oracle, label=None, n_gt=None):
     print('\n' + '=' * 64)
     print(f'  GO / NO-GO VERDICT{f" — CROP: {label}" if label else ""}  '
           f'(nozzle cells per frame = {NOZZLE_CELLS_PER_FRAME})')
@@ -476,6 +523,10 @@ def verdict(df, oracle, label=None):
         print(f'  Savings floor                        : {SAVINGS_FLOOR:.0%}')
         print(f'  Oracle spray rate (GT boxes)         : {oracle:.2%}')
         print(f'  RESULT: {"PASS" if passed else "FAIL"}')
+
+    # Uncertainty of the strip recall — information only, does NOT affect the verdict.
+    print('-' * 64)
+    print_strip_interval(df, row, n_gt)
 
     # Reference only — does NOT affect the verdict.
     print('-' * 64)
@@ -516,7 +567,7 @@ def report(df, n_gt, total_strips, oracle, per_image, out_dir, label=None, speed
               .to_string(index=False, float_format=lambda v: f'{v:.3f}'))
     print(f'\nCSV : {csv_path}\nPlot: {png_path}')
     if decide:
-        passed = verdict(df, oracle, label)
+        passed = verdict(df, oracle, label, n_gt)
         print_spill_reference(df, per_image, n_gt)
         return passed
 
