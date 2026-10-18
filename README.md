@@ -52,6 +52,7 @@ arrives in spring 2027.
 | `extract_frames.py` | Field video → frames at 2 FPS, video ID in each filename |
 | `split_dataset.py` | Crop-stratified train/val split by field, hard error on leakage |
 | `crops.py` | Video naming convention `<crop>_<field>_<YYYYMMDD>_<cam>` and multi-crop class order |
+| `prelabel_exg.py` | DRAFT weed boxes for fallow-field frames (Excess Green + Otsu), to be reviewed in the labeling tool |
 
 ## Pipeline order
 
@@ -143,6 +144,10 @@ in full, it is only linked here.
   ([Non-negotiable rules](#non-negotiable-rules)). Each crop needs one field in train and
   one in val, so a crop with fewer than 2 fields is a hard error in `split_dataset.py`;
   there is no fallback to a random split.
+- **Fallow fields** (`fallow_<field>_<YYYYMMDD>_<cam>`, no planted crop: bare soil, stubble)
+  are a field type, not a label: every class is sprayed there, `fallow` is not in the class
+  list, and the split needs at least 2 fallow fields like any crop; only these frames may be
+  pre-labeled ([Pre-labels for fallow fields](#pre-labels-for-fallow-fields)).
 - **`SPILL_TOLERANCE`** is set only from the measured spray footprint of the real nozzle,
   never tuned until the result passes ([Go / no-go decision rule](#go--no-go-decision-rule)).
 - **Rejected: SAHI, slicing, ROI-gating.** Slicing needs several forward passes per frame
@@ -163,6 +168,20 @@ in full, it is only linked here.
     on a real Jetson (capture, preprocessing, engine, postprocessing, nozzle decision).
   - If the model moves to INT8, `evaluate.py` is rerun with the INT8 TensorRT engine: a
     preserved mAP does not mean the 98% strip-recall point is preserved.
+
+## Pre-labels for fallow fields
+
+`prelabel_exg.py --images <fallow frames> [--out prelabels] [--min-area-px 25]` writes DRAFT
+`weed` boxes (one per connected green region: Excess Green index, Otsu threshold, small
+morphological opening) plus a `classes.txt` in `CLASS_NAMES` order, so the labeling tool's
+export later matches `split_dataset.py --export-classes`. It refuses any frame whose video ID
+is not a `fallow` field, because ExG cannot tell a crop from a weed, and it never writes into
+a labels folder or next to the images (`prelabels/` is git-ignored).
+
+- **Pre-labels must be reviewed by a human**, frame by frame, in the labeling tool before
+  they are used for anything.
+- **The validation set must be 100% human-verified.** Otherwise the go/no-go verdict
+  measures the pre-labeler against itself instead of measuring the detector against the field.
 
 ## Tests
 

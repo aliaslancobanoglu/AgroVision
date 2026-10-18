@@ -26,3 +26,6 @@ research/papers/*.pdf
 
 # Training console log (contains local paths)
 train_log.txt
+
+# Draft pre-labels from prelabel_exg.py (review in the labeling tool, never commit)
+prelabels/
