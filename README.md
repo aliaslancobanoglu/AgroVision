@@ -69,7 +69,7 @@ Konya field data (2027):
 3. `python split_dataset.py --images frames --labels <export> --out dataset_konya`
    — crop-stratified split **by field** (group = `crop_field` from the video name
    `<crop>_<field>_<YYYYMMDD>_<cam>`), never randomly by frame; every crop needs at least 2 fields.
-   Evaluate with `evaluate.py --crop-mode auto` (per-crop verdicts; see the project notes "Multi-crop plan")
+   Evaluate with `evaluate.py --crop-mode auto` (per-crop verdicts; see [Design decisions](#design-decisions))
 4. Train at `imgsz=1280` with a smaller batch (see the comment block in `train.py`),
    pointing `DATA` at `dataset_konya/data.yaml`
 5. Run the three variants below and compare them with `evaluate.py --imgsz 1280`
@@ -123,6 +123,46 @@ comes from field data split by field.
 - Never split video frames randomly into train/val — always by source video / field.
 - Extract frames at 2 FPS, not the native framerate.
 - Real field data needs `imgsz=1280` (2–5 cm weeds).
+
+## Design decisions
+
+The rules below are not obvious from the code. Where a section above already states a rule
+in full, it is only linked here.
+
+- **Go / no-go.** The decision metric is strip-level weed recall, not mAP: at 98% strip
+  recall, a spray rate above 65% (savings below 35%) means the project stops. Metric and
+  output: [Go / no-go decision rule](#go--no-go-decision-rule).
+- **Labels describe what the plant IS; the spray decision comes from the field's crop.**
+  Classes are `wheat`, `beet`, `corn`, `weed` (IDs 0-3, see `crops.py`), never a generic
+  "crop". In a beet field every class except `beet` is sprayed, so last season's wheat
+  growing in a beet field (a volunteer crop) is treated as a weed. `evaluate.py --crop-mode`
+  merges all sprayed classes into one before matching and gives a verdict per crop; the
+  pooled "overall" row is information only.
+- **Field-level splits, at least 2 fields per crop.** Train/val are split by whole
+  `crop_field` groups taken from the video name, never by frame
+  ([Non-negotiable rules](#non-negotiable-rules)). Each crop needs one field in train and
+  one in val, so a crop with fewer than 2 fields is a hard error in `split_dataset.py`;
+  there is no fallback to a random split.
+- **`SPILL_TOLERANCE`** is set only from the measured spray footprint of the real nozzle,
+  never tuned until the result passes ([Go / no-go decision rule](#go--no-go-decision-rule)).
+- **Rejected: SAHI, slicing, ROI-gating.** Slicing needs several forward passes per frame
+  plus merging (190-300 ms per frame on desktop GPUs in the papers reviewed) and gives no
+  extra resolution over direct 1280 px inference. ROI-gating cannot recover a region that
+  its proposal model missed, which costs recall and conflicts with the 98% rule. Instead,
+  train and infer directly at `imgsz=1280`.
+- **Field run (2027).**
+  - Beet and corn first, wheat last. Wheat (grass weeds in a grass crop, narrow leaves) is
+    pilot-labeled early and dropped if it is not learnable.
+  - Before bulk labeling: a written labeling guide per crop, and a 25-50 frame pilot from
+    the first field with a quick training run to check that the task is learnable.
+  - Timing budget: latency about 150-200 ms (the camera sees the ground 1 m ahead of the
+    nozzle, 240 ms at 15 km/h, minus valve response and a safety margin). The harder limit
+    is throughput: about 6 FPS per camera for gap-free coverage, i.e. about 20 ms per frame
+    end to end if 8 cameras share one Jetson.
+  - The number of Jetsons is decided only after measuring end-to-end latency and throughput
+    on a real Jetson (capture, preprocessing, engine, postprocessing, nozzle decision).
+  - If the model moves to INT8, `evaluate.py` is rerun with the INT8 TensorRT engine: a
+    preserved mAP does not mean the 98% strip-recall point is preserved.
 
 ## Tests
 

@@ -5,7 +5,7 @@ Standard mAP is NOT the decision metric. What matters for spot spraying is the
 trade-off between MISSING weeds (low recall -> weeds survive) and spraying
 UNNECESSARILY (high spray rate -> little herbicide saved).
 
-Decision rule (see the project notes / README.md):
+Decision rule (see README.md, "Go / no-go decision rule" and "Design decisions"):
     At 98% STRIP-LEVEL weed recall, if the sprayed-area fraction is above 65%
     (i.e. savings below 35%), the project stops.
 

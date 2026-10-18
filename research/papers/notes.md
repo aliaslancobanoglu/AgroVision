@@ -5,7 +5,7 @@ Bizim kurulum: 16 m kol, 8 kamera, 1280-1920 px, 15 km/s,
 git/dur kriteri %98 **strip-level** ot recall'ünde spray rate.
 
 > **Düzeltme (2026-10-15):** İlk sürümde "45 ms bütçe = 8 kare 45 ms'de"
-> varsayımı vardı; yanlıştı. Doğru bütçe (the project notes):
+> varsayımı vardı; yanlıştı. Doğru bütçe (README.md, "Design decisions" bölümü):
 > - **Gecikme ≈ 150-200 ms.** Kamera nozulun 1 m önünde; 15 km/s'de bu
 >   240 ms'lik pencere, eksi valf tepkisi ve pay.
 > - **Asıl kısıt throughput.** Boşluksuz kapsama için kamera başına ~6 FPS
@@ -38,7 +38,7 @@ git/dur kriteri %98 **strip-level** ot recall'ünde spray rate.
 4. **Bize en çok benzeyen veri seti (ACRE: robot, aşağı bakan kamera, mısır) en
    zoru.** Başka veri setlerini eklemek ona yardım etmedi. Tek sınıflı aynı
    ayarda mAP50:95 0.334 → 0.324, yani neredeyse nötr.
-   → Kaggle → Konya zincirinin kazanacağı garanti değil. the project notes'deki a/b
+   → Kaggle → Konya zincirinin kazanacağı garanti değil. README.md "Staged transfer learning" bölümündeki a/b
    kıyası zorunlu kalmalı. (Kanıt ilk sürümde yazdığımdan zayıf; aşağıdaki
    düzeltmeye bakın.)
 5. **Yayınlanan hiçbir in-domain sonuçta ot recall'ü %98'e ulaşmıyor.** Recall
@@ -154,8 +154,8 @@ etmiyor.
 
 **Karar etkisi olan bulgular:**
 - Sıfır-atış transfer çoğunlukla tek haneli mAP50'ye çöküyor. Kaynak verideki
-  yüksek skor, hedefte ne olacağını öngörmüyor. → the project notes'deki "Kaggle
-  sonucunu yanlış okuma" uyarısını doğruluyor.
+  yüksek skor, hedefte ne olacağını öngörmüyor. → README.md "For outside readers" bölümündeki "Status
+  (honest)" uyarısını (Kaggle sonucu proje kararı değildir) doğruluyor.
 - **Yakın plan (yer seviyesi) kaynakla ön eğitim, tam veriyle ince ayarda
   yine de faydalı:**
   - CottonWeedDet12 → soya: 84.9 (sıfırdan eğitim 76.8)
@@ -190,7 +190,8 @@ destekliyor.
   model bu kalemi tamamen siliyor. YOLO26n'nin maliyeti 5.4 GFLOPs; aynı
   640 px'te YOLO11n için AgriJetsonBench ~7.5 GFLOPs veriyor.
   → **Plan değişikliği önerisi:** Konya kıyasına YOLO26n de eklenmeli.
-  the project notes şu an yolo11n.pt'yi sabit tutuyor.
+  Plan o tarihte yalnızca yolo11n.pt'yi içeriyordu (bugün: README.md
+  "Staged transfer learning", seçenek c).
 - Veri setleri arası ortalama düşüş: mAP50:95 0.603 → 0.148 (%−75.6).
   Bütün veri setlerini birleştirerek eğitmek bu açığı kapatmıyor.
 - **ACRE** (robot, aşağı bakan Basler kamera, mısır/fasulye; bize en yakın
@@ -217,16 +218,16 @@ destekliyor.
 
 ## Önerilen aksiyonlar
 
-> 2026-10-15 durumu: Beş aksiyonun hepsi the project notes'ye işlendi. 1, 3, 4 ve 5:
-> plan madde 6a-c ve "Reddedilen yaklaşımlar" bölümü. 2: YOLO26n, plan madde
-> 5c olarak eklendi. YOLO26n'in Kaggle'daki avantajı zayıf: strip recall'de
+> 2026-10-15 durumu: Beş aksiyonun hepsi plana işlendi. Bugün README.md'de: 1, 3, 4
+> ve 5: "Design decisions" bölümü (saha koşusu ve reddedilen yaklaşımlar). 2: YOLO26n,
+> "Staged transfer learning" bölümünde seçenek c olarak eklendi. YOLO26n'in Kaggle'daki avantajı zayıf: strip recall'de
 > +3 puan, ama SPILL_TOLERANCE 0.1 referansında bu fark kayboluyor.
 
 1. Donanım bütçesi: Jetson üzerinde 1280 px'te **uçtan uca** throughput
    (hedef ≤ ~20 ms/kare, 8 kamera × 6 FPS) ve gecikme (hedef ≤ 150-200 ms)
    ölçülmeli: yakalama → ön işlem → motor → NMS → nozul kararı. Bunun için
    batch=8 ile "kamera başına batch=1" karşılaştırılmalı. Bu ölçüm yapılmadan
-   Jetson sayısı belirlenmemeli. (the project notes plan madde 6c)
+   Jetson sayısı belirlenmemeli. (README.md, "Design decisions" > "Field run")
 2. Konya kıyası (a)/(b)'ye bir (c) eklenmeli: yolo26n.pt (COCO) → Konya.
 3. INT8'e geçilirse recall-vs-spray eğrisi INT8 motorla yeniden üretilmeli.
 4. Konya ilkbaharı başında 25-50 karelik pilot etiketleme yapılıp hızlı bir
