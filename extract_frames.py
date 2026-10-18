@@ -14,7 +14,7 @@ Output naming (split_dataset.py depends on this — do not change casually):
 video_id is the source video's filename stem. Name videos
 <crop>_<field>_<YYYYMMDD>_<cam> (see crops.py), e.g.  beet_F01_20270415_cam3.mp4
 -> video_id "beet_F01_20270415_cam3", crop "beet", field "F01". Crop must be
-wheat, beet or corn. Avoid "__" inside video filenames.
+wheat, beet, corn or fallow (no planted crop). Avoid "__" inside video filenames.
 
 Every video name is validated against this convention (crops.parse_video_id) BEFORE
 any frame is extracted. One invalid name is a hard error and nothing is written, so a

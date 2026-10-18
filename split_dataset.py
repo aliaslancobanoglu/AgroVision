@@ -29,6 +29,8 @@ Input: frames produced by extract_frames.py, named
     <video_id>__f<frame_index:06d>.<ext>
 where video_id follows the naming convention (see crops.py):
     <crop>_<field>_<YYYYMMDD>_<cam>        e.g. beet_F01_20270415_cam3
+('fallow' fields, with no planted crop, are a crop value here and follow the same
+2-field / train-and-val rule as every crop.)
 plus YOLO label .txt files with the same stems (from Roboflow/CVAT export).
 Images without a label file are kept as background (negative) images.
 An unknown crop or a malformed video ID is a hard error.

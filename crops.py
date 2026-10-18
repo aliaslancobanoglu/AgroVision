@@ -5,7 +5,7 @@ Video naming convention:
 
     <crop>_<field>_<YYYYMMDD>_<cam>        e.g.  beet_F01_20270415_cam3
 
-  crop   one of CROPS (wheat, beet, corn)
+  crop   one of CROPS (wheat, beet, corn, fallow)
   field  alphanumeric field ID (no underscore)
   date   recording date, YYYYMMDD
   cam    cam<N>
@@ -16,13 +16,18 @@ the video ID is everything before the first '__'.
 Multi-crop class order (labels describe what the plant IS, never "crop"):
 
     0 = wheat, 1 = beet, 2 = corn, 3 = weed
+
+'fallow' is a FIELD TYPE, not a label: a field with no planted crop (bare soil,
+stubble), e.g. fallow_F01_20261020_cam1. Every plant in it is sprayed, so it has
+no crop class and is deliberately absent from CLASS_NAMES.
 """
 
 import re
 from datetime import datetime
 from typing import NamedTuple
 
-CROPS = ('wheat', 'beet', 'corn')
+FALLOW = 'fallow'                 # field type with no crop class: every class is sprayed
+CROPS = ('wheat', 'beet', 'corn', FALLOW)
 CLASS_NAMES = ('wheat', 'beet', 'corn', 'weed')
 SEP = '__'
 

@@ -126,6 +126,29 @@ def test_spray_classes_are_every_class_except_the_crop():
     assert ev.spray_classes_for(None, {0: 'crop', 1: 'weed'}) == {1}    # legacy: weed = class 1
 
 
+
+def test_in_a_fallow_field_every_class_is_sprayed():
+    assert ev.spray_classes_for('fallow', NAMES) == {WHEAT, BEET, CORN, WEED}
+    # 'fallow' is a field type: it never has to be a class name in data.yaml
+    assert 'fallow' not in NAMES.values()
+    assert ev.crop_mode_arg('fallow') == 'fallow'
+
+
+@pytest.mark.parametrize('crop_mode', ['auto', 'fallow'])
+def test_fallow_mode_counts_every_plant_as_a_weed(tmp_path, crop_mode):
+    labels = tmp_path / 'labels'
+    per_image = [
+        # fallow field: volunteer beet, corn and wheat plus a weed are all targets
+        make_image(labels, 'fallow_F01_20261020_cam1__f000001',
+                   gt=[(0, WEED), (1, BEET), (2, CORN), (3, WHEAT)],
+                   dets=[(0, WEED, .9), (1, BEET, .8), (2, WEED, .7)]),
+    ]
+    row, n_gt, oracle = evaluate_at_lowest_conf(per_image, labels, crop_mode)['fallow']
+    assert n_gt == 4
+    assert row['treated_weeds'] == 3                   # the wheat in strip 3 was missed
+    assert row['sprayed_strips'] == 3
+    assert oracle == pytest.approx(4 / 5)
+
 # ---- 95% Wilson interval ---------------------------------------------------------------
 
 @pytest.mark.parametrize('k, n, low, high', [

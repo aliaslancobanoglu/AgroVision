@@ -186,3 +186,27 @@ def test_unknown_crop_in_a_video_name_is_a_hard_error(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match='Unknown crop'):
         run_split(monkeypatch, '--images', frames, '--out', out, '--export-classes', export)
     assert not (out / 'images').exists()
+
+
+def test_fallow_fields_are_split_like_any_crop(tmp_path, monkeypatch):
+    videos = GOOD_VIDEOS + ['fallow_F01_20261020_cam1', 'fallow_F02_20261021_cam1']
+    frames = make_frames(tmp_path / 'frames', videos)
+    classes = write_classes(tmp_path / 'classes.txt', CLASS_NAMES)
+    out = tmp_path / 'out'
+    run_split(monkeypatch, '--images', frames, '--out', out, '--export-classes', classes)
+    with open(out / 'split_manifest.csv', newline='', encoding='utf-8') as f:
+        rows = [r for r in csv.DictReader(f) if r['crop'] == 'fallow']
+    assert {r['group']: r['split'] for r in rows} in (
+        {'fallow_F01': 'train', 'fallow_F02': 'val'}, {'fallow_F01': 'val', 'fallow_F02': 'train'})
+    # a field type, not a class
+    assert "names: ['wheat', 'beet', 'corn', 'weed']" in (out / 'data.yaml').read_text()
+
+
+def test_a_single_fallow_field_is_a_hard_error(tmp_path, monkeypatch):
+    frames = make_frames(tmp_path / 'frames', GOOD_VIDEOS + ['fallow_F01_20261020_cam1'])
+    classes = write_classes(tmp_path / 'classes.txt', CLASS_NAMES)
+    out = tmp_path / 'out'
+    with pytest.raises(SystemExit) as e:
+        run_split(monkeypatch, '--images', frames, '--out', out, '--export-classes', classes)
+    assert "Crop 'fallow' has only 1 field" in exit_message(e)
+    assert not (out / 'images').exists()

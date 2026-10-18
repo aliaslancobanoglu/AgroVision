@@ -51,3 +51,10 @@ def test_video_id_of_frame_name():
 def test_class_order_is_what_the_docs_say():
     assert CLASS_NAMES == ('wheat', 'beet', 'corn', 'weed')
     assert 'crop' not in CLASS_NAMES
+
+
+def test_fallow_is_a_field_type_not_a_label():
+    v = parse_video_id('fallow_F01_20261020_cam1')
+    assert v.crop == 'fallow' and v.group == 'fallow_F01'
+    assert 'fallow' in CROPS
+    assert 'fallow' not in CLASS_NAMES

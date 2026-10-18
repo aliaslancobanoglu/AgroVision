@@ -104,7 +104,10 @@ field's crop is known:
     auto     the crop is parsed from each image's file name
              (<crop>_<field>_<YYYYMMDD>_<cam>__f<index>.jpg); that image's spray
              classes = every class in data.yaml except its crop.
-    <crop>   a fixed crop name (wheat, beet, corn): every image is that crop's field.
+    <crop>   a fixed crop name (wheat, beet, corn, fallow): every image is that crop's field.
+A fallow field (no planted crop: bare soil, stubble) has no crop class, so its spray
+classes are ALL classes in data.yaml; "fallow" is a field type and never needs to be a
+class name.
 Before matching, all spray classes (in GT and in detections) are collapsed into
 one, so a volunteer wheat plant detected as "weed" still counts as found.
 Strip recall, box recall, spray rate, oracle and the PASS/FAIL verdict are
@@ -130,7 +133,7 @@ import pandas as pd
 import torch
 import yaml
 
-from crops import CROPS, parse_video_id, video_id_of_name
+from crops import CROPS, FALLOW, parse_video_id, video_id_of_name
 
 ROOT = Path(__file__).resolve().parent
 
@@ -191,9 +194,11 @@ def class_names(data_yaml: Path) -> dict:
 
 def spray_classes_for(crop, names: dict) -> frozenset:
     """Class ids sprayed in a field of `crop`: every class except the crop itself.
-    crop None = legacy Kaggle mode (weed = class 1 only)."""
+    crop None = legacy Kaggle mode (weed = class 1 only); fallow = every class."""
     if crop is None:
         return LEGACY_SPRAY_CLASSES
+    if crop == FALLOW:
+        return frozenset(names)
     ids = [i for i, n in names.items() if n == crop]
     if not ids:
         raise ValueError(f"Crop '{crop}' is not a class in data.yaml names {sorted(names.values())}; "
