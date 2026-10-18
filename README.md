@@ -46,7 +46,7 @@ arrives in spring 2027.
 | File | Purpose |
 |---|---|
 | `setup.md` | Install steps (CUDA PyTorch first, then the rest) and GPU verification |
-| `train.py` | YOLO11n training; `WEIGHTS` / `RUN_NAME` at the top |
+| `train.py` | YOLO11n training; `--data`, `--weights`, `--run-name`, `--imgsz`, `--batch`, `--epochs`, `--patience` (bare run = Kaggle defaults) |
 | `evaluate.py` | Go/no-go metric: strip-level weed recall vs. spray rate sweep, verdict |
 | `infer_video.py` | Annotated video output + per-frame latency (mean, p95) |
 | `extract_frames.py` | Field video → frames at 2 FPS, video ID in each filename |
@@ -70,8 +70,8 @@ Konya field data (2027):
    — crop-stratified split **by field** (group = `crop_field` from the video name
    `<crop>_<field>_<YYYYMMDD>_<cam>`), never randomly by frame; every crop needs at least 2 fields.
    Evaluate with `evaluate.py --crop-mode auto` (per-crop verdicts; see [Design decisions](#design-decisions))
-4. Train at `imgsz=1280` with a smaller batch (see the comment block in `train.py`),
-   pointing `DATA` at `dataset_konya/data.yaml`
+4. Train at `imgsz=1280` with a smaller batch (see the comment block in `train.py`):
+   `python train.py --data dataset_konya/data.yaml --weights <start .pt> --run-name <new name> --imgsz 1280 --batch 4`
 5. Run the three variants below and compare them with `evaluate.py --imgsz 1280`
 
 ## Staged transfer learning
@@ -80,7 +80,7 @@ Konya field data (2027):
 COCO (yolo11n.pt)  →  Kaggle  →  Konya
 ```
 
-Each stage starts from the previous stage's `best.pt` (set `WEIGHTS` in `train.py`).
+Each stage starts from the previous stage's `best.pt` (`python train.py --weights ...`).
 On Konya data, train and **compare** both:
 
 - a) `yolo11n.pt` (COCO) → Konya
